@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+build/
+target/
+.mvn/
+*.log
+.DS_Store
+.vscode/
+.idea/
+*.tmp
+Backend/maven.zip
+Backend/maven/
+test_gemini.ps1
