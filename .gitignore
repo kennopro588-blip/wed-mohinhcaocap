@@ -12,3 +12,5 @@ target/
 Backend/maven.zip
 Backend/maven/
 test_gemini.ps1
+.env*
+*.env

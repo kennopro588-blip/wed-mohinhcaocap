@@ -1,13 +1,25 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import styles from './AiChatWidget.module.css';
+
+interface SuggestedProduct {
+  id: string;
+  name: string;
+  brand: string;
+  price: number;
+  originalPrice?: number;
+  imageUrl?: string;
+  inStock?: boolean;
+}
 
 interface Message {
   id: number;
   role: 'bot' | 'user';
   text: string;
   isContact?: boolean;
+  products?: SuggestedProduct[];
 }
 
 // History format gửi lên Gemini API
@@ -35,7 +47,6 @@ const QUICK_REPLIES = [
   '🔄 Đổi trả sản phẩm',
 ];
 
-// Quick reply tĩnh cho '📞 Liên hệ chủ shop' để hiện contact card
 const CONTACT_TRIGGER = '📞 Liên hệ chủ shop';
 
 function formatText(text: string) {
@@ -80,6 +91,49 @@ function ContactCard() {
   );
 }
 
+function ProductCards({ products }: { products: SuggestedProduct[] }) {
+  return (
+    <div className={styles.productCards}>
+      {products.map(p => (
+        <Link
+          key={p.id}
+          href={`/products/${p.id}`}
+          className={styles.productCard}
+        >
+          {p.imageUrl ? (
+            <img
+              src={p.imageUrl}
+              alt={p.name}
+              className={styles.productCardImg}
+            />
+          ) : (
+            <div className={styles.productCardImgPlaceholder}>🚗</div>
+          )}
+          <div className={styles.productCardInfo}>
+            <div className={styles.productCardName}>{p.name}</div>
+            <div className={styles.productCardBrand}>{p.brand}</div>
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              <span className={styles.productCardPrice}>
+                {p.price.toLocaleString('vi-VN')}đ
+              </span>
+              {p.originalPrice && p.originalPrice > p.price && (
+                <span className={styles.productCardOrigPrice}>
+                  {p.originalPrice.toLocaleString('vi-VN')}đ
+                </span>
+              )}
+            </div>
+          </div>
+          <div className={styles.productCardArrow}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+              <path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export default function AiChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -87,7 +141,6 @@ export default function AiChatWidget() {
   const [isTyping, setIsTyping] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
   const [showBadge, setShowBadge] = useState(true);
-  // Lưu lịch sử hội thoại để gửi context lên Gemini
   const chatHistory = useRef<HistoryItem[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -95,12 +148,12 @@ export default function AiChatWidget() {
 
   const nextId = () => ++msgId.current;
 
-  const addBotMessage = (text: string, isContact = false) => {
-    setMessages(prev => [...prev, { id: nextId(), role: 'bot', text, isContact }]);
+  const addBotMessage = (text: string, isContact = false, products?: SuggestedProduct[]) => {
+    setMessages(prev => [...prev, { id: nextId(), role: 'bot', text, isContact, products }]);
   };
 
-  // Gọi Gemini AI thật qua API route
-  const callGeminiAI = async (userMessage: string): Promise<string> => {
+  // Gọi API chat (Gemini + product suggestions)
+  const callChatAPI = async (userMessage: string): Promise<{ reply: string; products?: SuggestedProduct[] }> => {
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -116,10 +169,15 @@ export default function AiChatWidget() {
       }
 
       const data = await response.json();
-      return data.reply || 'Xin lỗi, tôi không có câu trả lời lúc này. Vui lòng thử lại! 😊';
+      return {
+        reply: data.reply || 'Xin lỗi, tôi không có câu trả lời lúc này. Vui lòng thử lại! 😊',
+        products: data.products,
+      };
     } catch (error) {
-      console.error('Gemini API call failed:', error);
-      return 'Kết nối AI tạm thời gián đoạn. Bạn vui lòng liên hệ hotline **0909 123 456** để được hỗ trợ trực tiếp nhé! 📞';
+      console.error('Chat API call failed:', error);
+      return {
+        reply: 'Kết nối AI tạm thời gián đoạn. Bạn vui lòng liên hệ hotline **0909 123 456** để được hỗ trợ trực tiếp nhé! 📞',
+      };
     }
   };
 
@@ -134,7 +192,6 @@ export default function AiChatWidget() {
         setIsTyping(false);
         const welcomeMsg = `Xin chào bạn! 👋 Tôi là **LUXE AI** — trợ lý ảo thông minh của cửa hàng **${STORE_INFO.name}**.`;
         addBotMessage(welcomeMsg);
-        // Thêm vào history
         chatHistory.current.push({ role: 'model', text: welcomeMsg });
         setIsTyping(true);
       }, 800);
@@ -166,15 +223,12 @@ export default function AiChatWidget() {
     }
   }, [isOpen]);
 
-  // Xử lý quick reply - contact card tĩnh, còn lại gửi lên Gemini
   const handleQuickReply = async (reply: string) => {
-    // Hiện tin nhắn user
     setMessages(prev => [...prev, { id: nextId(), role: 'user', text: reply }]);
     chatHistory.current.push({ role: 'user', text: reply });
     setIsTyping(true);
 
     if (reply === CONTACT_TRIGGER) {
-      // Contact card — không cần gọi AI
       setTimeout(() => {
         setIsTyping(false);
         const contactMsg = 'Dưới đây là thông tin liên hệ của **LUXE Models**, bạn có thể liên hệ qua bất kỳ kênh nào nhé! 📬';
@@ -182,15 +236,13 @@ export default function AiChatWidget() {
         chatHistory.current.push({ role: 'model', text: contactMsg });
       }, 600);
     } else {
-      // Gọi Gemini AI thật
-      const aiReply = await callGeminiAI(reply);
+      const { reply: aiReply, products } = await callChatAPI(reply);
       setIsTyping(false);
-      addBotMessage(aiReply);
+      addBotMessage(aiReply, false, products);
       chatHistory.current.push({ role: 'model', text: aiReply });
     }
   };
 
-  // Gửi tin nhắn tự do → Gemini AI thật
   const handleSend = async () => {
     const text = inputText.trim();
     if (!text || isTyping) return;
@@ -200,9 +252,9 @@ export default function AiChatWidget() {
     setInputText('');
     setIsTyping(true);
 
-    const aiReply = await callGeminiAI(text);
+    const { reply: aiReply, products } = await callChatAPI(text);
     setIsTyping(false);
-    addBotMessage(aiReply);
+    addBotMessage(aiReply, false, products);
     chatHistory.current.push({ role: 'model', text: aiReply });
   };
 
@@ -247,6 +299,9 @@ export default function AiChatWidget() {
                 <div className={styles.bubbleText}>
                   {formatText(msg.text)}
                   {msg.isContact && <ContactCard />}
+                  {msg.products && msg.products.length > 0 && (
+                    <ProductCards products={msg.products} />
+                  )}
                 </div>
               </div>
             ))}
